@@ -5,21 +5,21 @@ import pino from 'pino';
 import axios from 'axios';
 
 // Destructure dari package default
-const {
-  default: makeWASocket,
+  default as makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  proto,
+  
+
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} = baileysPackage;
+} from 'baileys-york';
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
