@@ -7,7 +7,7 @@ import {
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  proto,
+  
 
   jidDecode,
   delay,
