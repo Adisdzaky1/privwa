@@ -6,8 +6,6 @@ import makeWASocket, {
   Browsers,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  proto,
-  PHONENUMBER_MCC,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
