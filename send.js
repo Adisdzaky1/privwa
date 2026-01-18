@@ -6,7 +6,7 @@ import axios from 'axios';
 
 // Destructure dari package default
 import {
-  default as makeWASocket,
+  makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
