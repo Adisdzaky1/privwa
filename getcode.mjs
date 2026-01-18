@@ -1,20 +1,20 @@
-import { DisconnectReason, useMultiFileAuthState } from 'baileys-york';
-import {
-  makeWASocket,
+import makeWASocket, {
+  DisconnectReason,
+  useMultiFileAuthState,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  
-
+  proto,
+  PHONENUMBER_MCC,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} from 'baileys-york';
+} from 'baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { Redis } from '@upstash/redis';
