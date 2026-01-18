@@ -11,8 +11,8 @@ const path = require('path');
 require('dotenv').config();
 
 // Import route handlers
-const sendHandler = require('./send.js');
-const getcodeHandler = require('./getcode.js');
+const sendHandler = require('./send.cjs');
+const getcodeHandler = require('./getcode.cjs');
 
 const app = express();
 
