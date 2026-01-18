@@ -15,8 +15,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Import route handlers
-import sendHandler from './send.js';
-import getcodeHandler from './getcode.js';
+import sendHandler from './send.mjs';
+import getcodeHandler from './getcode.mjs';
 
 const app = express();
 
