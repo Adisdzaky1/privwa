@@ -1,18 +1,22 @@
-const express = require('express');
-const helmet = require('helmet');
-const cors = require('cors');
-const rateLimit = require('express-rate-limit');
-const compression = require('compression');
-const morgan = require('morgan');
-const fs = require('fs');
-const path = require('path');
+import express from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import rateLimit from 'express-rate-limit';
+import compression from 'compression';
+import morgan from 'morgan';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import 'dotenv/config';
 
-// Load environment variables
-require('dotenv').config();
+// Get __dirname equivalent in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Import route handlers
-const sendHandler = require('./send.cjs');
-const getcodeHandler = require('./getcode.cjs');
+import sendHandler from './send.js';
+import getcodeHandler from './getcode.js';
 
 const app = express();
 
@@ -157,7 +161,7 @@ app.get('/api/getcode', apiKeyAuth, getcodeHandler);
 // Session Management Routes
 app.get('/api/sessions', apiKeyAuth, async (req, res) => {
   try {
-    const { Redis } = require('@upstash/redis');
+    const { Redis } = await import('@upstash/redis');
     
     const redis = new Redis({
       url: process.env.REDIS_URL,
@@ -205,7 +209,7 @@ app.delete('/api/session/:number', apiKeyAuth, async (req, res) => {
       });
     }
     
-    const { Redis } = require('@upstash/redis');
+    const { Redis } = await import('@upstash/redis');
     
     const redis = new Redis({
       url: process.env.REDIS_URL,
@@ -232,7 +236,7 @@ app.delete('/api/session/:number', apiKeyAuth, async (req, res) => {
 // Usage Statistics Endpoint (untuk monitoring)
 app.get('/api/stats', apiKeyAuth, async (req, res) => {
   try {
-    const { Redis } = require('@upstash/redis');
+    const { Redis } = await import('@upstash/redis');
     
     const redis = new Redis({
       url: process.env.REDIS_URL,
@@ -338,4 +342,4 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
 }
 
 // Export for Vercel
-module.exports = app;
+export default app;
