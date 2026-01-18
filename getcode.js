@@ -1,6 +1,6 @@
-const { DisconnectReason, useMultiFileAuthState } = require('baileys-york');
-const {
-  default: makeWASocket,
+import { DisconnectReason, useMultiFileAuthState } from 'baileys-york';
+import {
+  default as makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
@@ -14,10 +14,10 @@ const {
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} = require('baileys-york');
-const QRCode = require('qrcode');
-const pino = require('pino');
-const { Redis } = require('@upstash/redis');
+} from 'baileys-york';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import { Redis } from '@upstash/redis';
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
@@ -98,7 +98,7 @@ async function getSessionInfo(number) {
   }
 }
 
-module.exports = async (req, res) => {
+export default async (req, res) => {
   try {
     const number = req.query.number;
     const action = req.query.action || 'connect'; // connect, list, info, delete
