@@ -13,7 +13,7 @@ import makeWASocket, {
   getContentType,
   DisconnectReason,
   useMultiFileAuthState
-} from 'baileys';
+} from '@whiskeysockets/baileys';
 import { Redis } from '@upstash/redis';
 import QRCode from 'qrcode';
 import pino from 'pino';
