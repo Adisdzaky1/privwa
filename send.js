@@ -5,6 +5,7 @@ import pino from 'pino';
 import axios from 'axios';
 
 // Destructure dari package default
+import {
   default as makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
