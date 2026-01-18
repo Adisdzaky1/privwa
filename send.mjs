@@ -2,7 +2,6 @@ import makeWASocket, {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
-  makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   proto,
