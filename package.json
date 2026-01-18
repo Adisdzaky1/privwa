@@ -5,8 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "vercel-build": "echo 'No build required'"
+    "dev": "nodemon index.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.0",
