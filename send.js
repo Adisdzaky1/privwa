@@ -1,5 +1,12 @@
-import {
-  default as makeWASocket,
+import baileysPackage from 'baileys-york';
+import { Redis } from '@upstash/redis';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import axios from 'axios';
+
+// Destructure dari package default
+const {
+  default: makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
@@ -7,18 +14,12 @@ import {
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
   proto,
-  PHONEnomor_MCC,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} from 'baileys-york';
-import { Redis } from '@upstash/redis';
-import QRCode from 'qrcode';
-import pino from 'pino';
-import axios from 'axios';
-import FormData from 'form-data';
+} = baileysPackage;
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
@@ -73,24 +74,6 @@ async function downloadImage(url) {
     return response.data;
   } catch (error) {
     console.error('Error downloading image:', error.message);
-    throw error;
-  }
-}
-
-// Fungsi untuk mengupload gambar ke WhatsApp server
-async function uploadMedia(sock, buffer, mimeType) {
-  try {
-    const media = {
-      [mimeType.startsWith('image/') ? 'image' : 'document']: buffer
-    };
-    
-    const preparedMedia = await prepareWAMessageMedia(media, {
-      upload: sock.authState.creds.mediaUpload
-    });
-    
-    return preparedMedia;
-  } catch (error) {
-    console.error('Error uploading media:', error.message);
     throw error;
   }
 }
@@ -307,9 +290,6 @@ async function handleSendMessage(res, params) {
                 });
                 
                 console.log('Gambar berhasil dikirim');
-                
-                // Kirim juga pesan teks terpisah untuk memastikan
-                
                 
                 res.status(200).json({ 
                   status: 'success', 
