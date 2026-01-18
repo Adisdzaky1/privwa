@@ -1,6 +1,6 @@
 import { DisconnectReason, useMultiFileAuthState } from 'baileys-york';
 import {
-  default as makeWASocket,
+  makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
