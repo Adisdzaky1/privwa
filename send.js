@@ -1,5 +1,5 @@
-const {
-  default: makeWASocket,
+import {
+  default as makeWASocket,
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
@@ -13,12 +13,12 @@ const {
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} = require('baileys-york');
-const { Redis } = require('@upstash/redis');
-const QRCode = require('qrcode');
-const pino = require('pino');
-const axios = require('axios');
-const FormData = require('form-data');
+} from 'baileys-york';
+import { Redis } from '@upstash/redis';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import axios from 'axios';
+import FormData from 'form-data';
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
@@ -95,51 +95,6 @@ async function uploadMedia(sock, buffer, mimeType) {
   }
 }
 
-module.exports = async (req, res) => {
-  try {
-    const { 
-      product, 
-      id, 
-      nominal, 
-      tujuan, 
-      tanggal, 
-      nomor,
-      image_url, // URL gambar yang akan dikirim
-      caption,   // Caption untuk gambar
-      action = 'send' // send, connect, status
-    } = req.query;
-
-    // Handle different actions
-    switch (action) {
-      case 'connect':
-        return handleConnect(req, res, nomor);
-      case 'status':
-        return handleStatus(res, nomor);
-      case 'send':
-        // Validasi parameter untuk pengiriman pesan
-        if (!message || !nomor) {
-          return res.status(400).json({
-            status: 'error',
-            message: 'Semua parameter (message, nomor) harus diisi.',
-          });
-        }
-        return handleSendMessage(res, { message, nomor, image_url });
-      default:
-        return res.status(400).json({
-          status: 'error',
-          message: 'Action tidak valid. Gunakan: send, connect, atau status'
-        });
-    }
-  } catch (error) {
-    console.error('Error:', error.message);
-    return res.status(500).json({ 
-      status: 'error', 
-      message: error.message 
-    });
-  }
-};
-
-// Fungsi untuk handle koneksi WhatsApp
 async function handleConnect(req, res, nomor) {
   if (!nomor) {
     return res.status(400).json({
@@ -292,7 +247,7 @@ async function handleStatus(res, nomor) {
 
 // Fungsi utama untuk mengirim pesan
 async function handleSendMessage(res, params) {
-  const { message, nomor } = params;
+  const { message, nomor, image_url } = params;
 
   try {
     // Ambil sesi dari Redis
@@ -455,3 +410,47 @@ async function getAllSessions() {
     return [];
   }
 }
+
+export default async (req, res) => {
+  try {
+    const { 
+      product, 
+      id, 
+      nominal, 
+      tujuan, 
+      tanggal, 
+      nomor,
+      image_url, // URL gambar yang akan dikirim
+      caption,   // Caption untuk gambar
+      action = 'send' // send, connect, status
+    } = req.query;
+
+    // Handle different actions
+    switch (action) {
+      case 'connect':
+        return handleConnect(req, res, nomor);
+      case 'status':
+        return handleStatus(res, nomor);
+      case 'send':
+        // Validasi parameter untuk pengiriman pesan
+        if (!nomor) {
+          return res.status(400).json({
+            status: 'error',
+            message: 'Semua parameter (message, nomor) harus diisi.',
+          });
+        }
+        return handleSendMessage(res, { message: caption || 'Pesan dari API', nomor, image_url });
+      default:
+        return res.status(400).json({
+          status: 'error',
+          message: 'Action tidak valid. Gunakan: send, connect, atau status'
+        });
+    }
+  } catch (error) {
+    console.error('Error:', error.message);
+    return res.status(500).json({ 
+      status: 'error', 
+      message: error.message 
+    });
+  }
+};
