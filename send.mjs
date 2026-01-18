@@ -1,26 +1,23 @@
-import baileysPackage from 'baileys-york';
-import { Redis } from '@upstash/redis';
-import QRCode from 'qrcode';
-import pino from 'pino';
-import axios from 'axios';
-
-// Destructure dari package default
-import {
-  makeWASocket,
+import makeWASocket, {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  
-
+  proto,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
-  getContentType
-} from 'baileys-york';
+  getContentType,
+  DisconnectReason,
+  useMultiFileAuthState
+} from 'baileys';
+import { Redis } from '@upstash/redis';
+import QRCode from 'qrcode';
+import pino from 'pino';
+import axios from 'axios';
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
@@ -145,7 +142,7 @@ async function handleConnect(req, res, nomor) {
         await redis.del(`whatsapp:connected:${nomor}`);
         await redis.del(`whatsapp:user:${nomor}`);
 
-        if (reason === 401) { // loggedOut
+        if (reason === DisconnectReason.loggedOut) {
           console.log('User logged out, clearing session');
           await redis.del(`whatsapp:session:${nomor}`);
           await redis.srem('whatsapp:sessions:list', nomor);
@@ -342,7 +339,7 @@ async function handleSendMessage(res, params) {
           console.log('Koneksi terputus:', update.lastDisconnect?.error);
           const reason = update.lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
           
-          if (reason !== 401) { // bukan loggedOut
+          if (reason !== DisconnectReason.loggedOut) {
             console.log('Mencoba menyambung ulang...');
             // Tidak perlu reconnect karena ini one-time send
           } else {
@@ -417,10 +414,14 @@ export default async (req, res) => {
         if (!nomor) {
           return res.status(400).json({
             status: 'error',
-            message: 'Semua parameter (message, nomor) harus diisi.',
+            message: 'Parameter "nomor" diperlukan',
           });
         }
-        return handleSendMessage(res, { message: caption || 'Pesan dari API', nomor, image_url });
+        return handleSendMessage(res, { 
+          message: caption || 'Pesan dari API', 
+          nomor, 
+          image_url 
+        });
       default:
         return res.status(400).json({
           status: 'error',
