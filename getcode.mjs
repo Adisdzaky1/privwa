@@ -147,6 +147,9 @@ export default async (req, res) => {
           // Fungsi ini akan dipanggil oleh event creds.update
         }
       };
+      const { version } = await fetchLatestBaileysVersion();
+
+
         const usePairingCode = true;
 
         const sock = makeWASocket({
@@ -269,7 +272,7 @@ browser: ["iOS", "Safari", "16.5.1" ],
         });
 
         // Permintaan pairing code jika diperlukan
-             if (pairingCode && !res.headersSent) {
+             if (usePairingCode && !res.headersSent) {
              const code = await sock.requestPairingCode(nomor);
                 return res.status(200).json({
                   status: 'success',
