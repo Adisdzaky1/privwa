@@ -140,12 +140,12 @@ export default async (req, res) => {
       });
 
       sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect } = update;
+        const { qr, connection, lastDisconnect } = update;
 
-        if (!pairingCode && !res.headersSent) {
+    /*    if (!pairingCode && !res.headersSent) {
           const qrImage = await QRCode.toDataURL(qr);
           return res.status(200).json({ status: 'success', qrCode: qrImage });
-        }
+        }*/
 
         if (connection === 'open') {
           console.log(`Connected: ${nomor}`);
@@ -166,7 +166,7 @@ export default async (req, res) => {
       if (pairingCode && !res.headersSent) {
         try {
           // Beri jeda sedikit agar socket siap
-          await new Promise(resolve => setTimeout(resolve, 3000));
+          
           const code = await sock.requestPairingCode(nomor);
           return res.status(200).json({
             status: 'success',
