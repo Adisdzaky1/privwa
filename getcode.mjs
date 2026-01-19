@@ -23,15 +23,15 @@ const redis = new Redis({
 });
 
 // Fungsi untuk mendapatkan sesi dari Redis
-async function getSession(number) {
+async function getSession(nomor) {
   try {
-    const authState = await redis.get(`whatsapp:session:${number}`);
+    const authState = await redis.get(`whatsapp:session:${nomor}`);
     
     if (authState) {
       try {
         return JSON.parse(authState);
       } catch (e) {
-        console.error(`Error parsing auth state for ${number}:`, e.message);
+        console.error(`Error parsing auth state for ${nomor}:`, e.message);
         return null;
       }
     }
@@ -43,25 +43,25 @@ async function getSession(number) {
 }
 
 // Fungsi untuk menyimpan sesi ke Redis
-async function saveSession(number, state) {
+async function saveSession(nomor, state) {
   try {
     // Simpan dengan TTL 7 hari (604800 detik)
-    await redis.set(`whatsapp:session:${number}`, JSON.stringify(state), {
+    await redis.set(`whatsapp:session:${nomor}`, JSON.stringify(state), {
       ex: 2592000, // 30 hari dalam detik
     });
     
     // Simpan juga ke set untuk tracking semua session
-    await redis.sadd('whatsapp:sessions:list', number);
+    await redis.sadd('whatsapp:sessions:list', nomor);
   } catch (err) {
     console.error(`Error in saveSession:`, err.message);
   }
 }
 
 // Fungsi untuk menghapus sesi
-async function deleteSession(number) {
+async function deleteSession(nomor) {
   try {
-    await redis.del(`whatsapp:session:${number}`);
-    await redis.srem('whatsapp:sessions:list', number);
+    await redis.del(`whatsapp:session:${nomor}`);
+    await redis.srem('whatsapp:sessions:list', nomor);
   } catch (err) {
     console.error(`Error in deleteSession:`, err.message);
   }
@@ -79,10 +79,10 @@ async function getAllSessions() {
 }
 
 // Fungsi untuk mendapatkan info sesi
-async function getSessionInfo(number) {
+async function getSessionInfo(nomor) {
   try {
-    const ttl = await redis.ttl(`whatsapp:session:${number}`);
-    const exists = await redis.exists(`whatsapp:session:${number}`);
+    const ttl = await redis.ttl(`whatsapp:session:${nomor}`);
+    const exists = await redis.exists(`whatsapp:session:${nomor}`);
     
     return {
       exists: exists === 1,
@@ -97,13 +97,13 @@ async function getSessionInfo(number) {
 
 export default async (req, res) => {
   try {
-    const number = req.query.number;
+    const nomor = req.query.nomor;
     const action = req.query.action || 'connect'; // connect, list, info, delete
     
-    if (!number && !['list'].includes(action)) {
+    if (!nomor && !['list'].includes(action)) {
       return res.status(400).json({
         status: 'error',
-        message: 'Parameter "number" is required for this action',
+        message: 'Parameter "nomor" is required for this action',
       });
     }
     
@@ -113,10 +113,10 @@ export default async (req, res) => {
         const sessions = await getAllSessions();
         const sessionsInfo = [];
         
-        for (const sessionNumber of sessions) {
-          const info = await getSessionInfo(sessionNumber);
+        for (const sessionNomor of sessions) {
+          const info = await getSessionInfo(sessionNomor);
           sessionsInfo.push({
-            number: sessionNumber,
+            nomor: sessionNomor,
             ...info
           });
         }
@@ -128,18 +128,18 @@ export default async (req, res) => {
         });
         
       case 'info':
-        const info = await getSessionInfo(number);
+        const info = await getSessionInfo(nomor);
         return res.status(200).json({
           status: 'success',
-          number: number,
+          nomor: nomor,
           ...info
         });
         
       case 'delete':
-        await deleteSession(number);
+        await deleteSession(nomor);
         return res.status(200).json({
           status: 'success',
-          message: `Session for ${number} deleted successfully`
+          message: `Session for ${nomor} deleted successfully`
         });
     }
     
@@ -147,7 +147,7 @@ export default async (req, res) => {
     async function connectToWhatsApp() {
       try {
         // Ambil session dari Redis
-        const savedState = await getSession(number);
+        const savedState = await getSession(nomor);
         const authState = savedState || {};
         const usePairingCode = true;
 
@@ -175,7 +175,7 @@ export default async (req, res) => {
             return res.status(200).json({
               status: 'success',
               qrCode: qrImage,
-              message: `QR code for ${number} generated successfully`,
+              message: `QR code for ${nomor} generated successfully`,
             });
           }
 
@@ -183,16 +183,16 @@ export default async (req, res) => {
             return res.status(200).json({
               status: 'success',
               pairingCode,
-              message: `Pairing code for ${number} generated successfully`,
+              message: `Pairing code for ${nomor} generated successfully`,
             });
           }
 
           if (connection === 'open') {
-            console.log(`Connected to WhatsApp for number: ${number}`);
+            console.log(`Connected to WhatsApp for nomor: ${nomor}`);
             if (sock?.user) {
               console.log(`User: ${sock.user.id} connected`);
               // Update session info after successful connection
-              await redis.set(`whatsapp:connected:${number}`, 'true', {
+              await redis.set(`whatsapp:connected:${nomor}`, 'true', {
                 ex: 86400, // 1 hari
               });
             } else {
@@ -203,17 +203,17 @@ export default async (req, res) => {
           if (connection === 'close') {
             const reason =
               lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
-            console.log(`Connection closed for number: ${number} - Reason: ${reason}`);
+            console.log(`Connection closed for nomor: ${nomor} - Reason: ${reason}`);
 
             // Hapus connected status
-            await redis.del(`whatsapp:connected:${number}`);
+            await redis.del(`whatsapp:connected:${nomor}`);
 
             if (reason !== DisconnectReason.loggedOut) {
               console.log('Reconnecting...');
               await connectToWhatsApp();
             } else {
               console.log('User logged out, clearing session');
-              await deleteSession(number);
+              await deleteSession(nomor);
             }
           }
         });
@@ -221,16 +221,16 @@ export default async (req, res) => {
         // Simpan kredensial saat diperbarui
         sock.ev.on('creds.update', async (newState) => {
           try {
-            await saveSession(number, newState);
+            await saveSession(nomor, newState);
           } catch (err) {
-            console.error(`Failed to save session for ${number}:`, err.message);
+            console.error(`Failed to save session for ${nomor}:`, err.message);
           }
         });
 
         // Permintaan pairing code jika diperlukan
         if (usePairingCode) {
-          const code = await sock.requestPairingCode(number);
-          console.log(`Pairing code for ${number}: ${code}`);
+          const code = await sock.requestPairingCode(nomor);
+          console.log(`Pairing code for ${nomor}: ${code}`);
         }
         
         return sock;
@@ -238,14 +238,14 @@ export default async (req, res) => {
         console.error(`Error during WhatsApp connection:`, error.message);
         res.status(500).json({
           status: 'error',
-          message: 'Failed to connect to WhatsApp',
+          message: `Failed to connect to WhatsApp\n${error}`,
         });
       }
     }
 
     await connectToWhatsApp();
   } catch (error) {
-    console.error(`Error for number: ${req.query.number || 'unknown'} -`, error.message);
+    console.error(`Error for nomor: ${req.query.nomor || 'unknown'} -`, error.message);
     res.status(500).json({ status: 'error', message: error.message });
   }
 };
