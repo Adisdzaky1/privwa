@@ -1,4 +1,4 @@
-iimport makeWASocket, {
+import makeWASocket, {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
