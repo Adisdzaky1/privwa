@@ -1,7 +1,16 @@
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  makeCacheableSignalKeyStore
+  generateWAMessageFromContent,
+  prepareWAMessageMedia,
+  Browsers,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
+  jidDecode,
+  delay,
+  getAggregateVotesInPollMessage,
+  downloadContentFromMessage,
+  getContentType
 } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
@@ -9,24 +18,20 @@ import { Redis } from '@upstash/redis';
 
 // Konfigurasi Redis Upstash
 const redis = new Redis({
-  url: process.env.REDIS_URL || 'https://your-redis.upstash.io',
-  token: process.env.REDIS_TOKEN || 'your-redis-token',
+  url: process.env.REDIS_URL || 'https://YOUR_REDIS_URL.upstash.io',
+  token: process.env.REDIS_TOKEN || 'YOUR_REDIS_TOKEN',
 });
 
 // Fungsi untuk mendapatkan sesi dari Redis
-async function getSession(number) {
+async function getSession(nomor) {
   try {
-    const sessionData = await redis.get(`whatsapp:session:${number}`);
+    const authState = await redis.get(`whatsapp:session:${nomor}`);
     
-    if (sessionData) {
+    if (authState) {
       try {
-        const parsed = JSON.parse(sessionData);
-        return {
-          creds: parsed.creds || {},
-          keys: parsed.keys || makeCacheableSignalKeyStore({}, { logger: pino().child({ level: 'fatal' }) }),
-        };
+        return JSON.parse(authState);
       } catch (e) {
-        console.error(`Error parsing auth state for ${number}:`, e.message);
+        console.error(`Error parsing auth state for ${nomor}:`, e.message);
         return null;
       }
     }
@@ -38,70 +43,81 @@ async function getSession(number) {
 }
 
 // Fungsi untuk menyimpan sesi ke Redis
-async function saveSession(number, state) {
+async function saveSession(nomor, state) {
   try {
-    if (!state || !state.creds) {
-      console.error('Invalid state to save for', number);
-      return;
-    }
-
-    // Simpan dengan TTL 30 hari (2592000 detik)
-    await redis.set(`whatsapp:session:${number}`, JSON.stringify(state), {
-      ex: 2592000,
+    // Simpan dengan TTL 7 hari (604800 detik)
+    await redis.set(`whatsapp:session:${nomor}`, JSON.stringify(state), {
+      ex: 2592000, // 30 hari dalam detik
     });
     
     // Simpan juga ke set untuk tracking semua session
-    await redis.sadd('whatsapp:sessions:list', number);
-    
-    console.log(`Session saved for ${number}`);
+    await redis.sadd('whatsapp:sessions:list', nomor);
   } catch (err) {
     console.error(`Error in saveSession:`, err.message);
   }
 }
 
 // Fungsi untuk menghapus sesi
-async function deleteSession(number) {
+async function deleteSession(nomor) {
   try {
-    await redis.del(`whatsapp:session:${number}`);
-    await redis.del(`whatsapp:connected:${number}`);
-    await redis.srem('whatsapp:sessions:list', number);
-    console.log(`Session deleted for ${number}`);
+    await redis.del(`whatsapp:session:${nomor}`);
+    await redis.srem('whatsapp:sessions:list', nomor);
   } catch (err) {
     console.error(`Error in deleteSession:`, err.message);
   }
 }
 
-export default async (req, res) => {
-  // Set timeout yang lebih panjang untuk Vercel
-  res.setTimeout(120000); // 2 menit
-  
+// Fungsi untuk mendapatkan semua sesi aktif
+async function getAllSessions() {
   try {
-    const number = req.query.number;
-    const action = req.query.action || 'connect';
+    const sessions = await redis.smembers('whatsapp:sessions:list');
+    return sessions;
+  } catch (err) {
+    console.error(`Error in getAllSessions:`, err.message);
+    return [];
+  }
+}
+
+// Fungsi untuk mendapatkan info sesi
+async function getSessionInfo(nomor) {
+  try {
+    const ttl = await redis.ttl(`whatsapp:session:${nomor}`);
+    const exists = await redis.exists(`whatsapp:session:${nomor}`);
     
-    if (!number && !['list'].includes(action)) {
+    return {
+      exists: exists === 1,
+      ttl: ttl, // -2: key tidak ada, -1: no expiry, >=0: sisa waktu dalam detik
+      expires_in: ttl > 0 ? `${Math.floor(ttl / 86400)} hari ${Math.floor((ttl % 86400) / 3600)} jam` : 'tidak ada expiry'
+    };
+  } catch (err) {
+    console.error(`Error in getSessionInfo:`, err.message);
+    return null;
+  }
+}
+
+export default async (req, res) => {
+  try {
+    const nomor = req.query.nomor;
+    const action = req.query.action || 'connect'; // connect, list, info, delete
+    
+    if (!nomor && !['list'].includes(action)) {
       return res.status(400).json({
         status: 'error',
-        message: 'Parameter "number" is required',
+        message: 'Parameter "nomor" is required for this action',
       });
     }
     
-    // Jika action bukan connect, handle terpisah
-    if (action === 'list') {
-      try {
-        const sessions = await redis.smembers('whatsapp:sessions:list');
+    // Handle different actions
+    switch (action) {
+      case 'list':
+        const sessions = await getAllSessions();
         const sessionsInfo = [];
         
-        for (const sessionNumber of sessions) {
-          const exists = await redis.exists(`whatsapp:session:${sessionNumber}`);
-          const connected = await redis.exists(`whatsapp:connected:${sessionNumber}`);
-          const ttl = await redis.ttl(`whatsapp:session:${sessionNumber}`);
-          
+        for (const sessionNomor of sessions) {
+          const info = await getSessionInfo(sessionNomor);
           sessionsInfo.push({
-            number: sessionNumber,
-            has_session: exists === 1,
-            is_connected: connected === 1,
-            expires_in_days: ttl > 0 ? Math.floor(ttl / 86400) : 'never'
+            nomor: sessionNomor,
+            ...info
           });
         }
         
@@ -110,250 +126,186 @@ export default async (req, res) => {
           total_sessions: sessions.length,
           sessions: sessionsInfo
         });
-      } catch (error) {
-        return res.status(500).json({
-          status: 'error',
-          message: error.message
-        });
-      }
-    }
-    
-    if (action === 'info') {
-      try {
-        const exists = await redis.exists(`whatsapp:session:${number}`);
-        const connected = await redis.exists(`whatsapp:connected:${number}`);
-        const ttl = await redis.ttl(`whatsapp:session:${number}`);
         
+      case 'info':
+        const info = await getSessionInfo(nomor);
         return res.status(200).json({
           status: 'success',
-          number: number,
-          has_session: exists === 1,
-          is_connected: connected === 1,
-          ttl_seconds: ttl,
-          expires_in: ttl > 0 ? `${Math.floor(ttl / 86400)} days` : 'never'
+          nomor: nomor,
+          ...info
         });
-      } catch (error) {
-        return res.status(500).json({
-          status: 'error',
-          message: error.message
-        });
-      }
-    }
-    
-    if (action === 'delete') {
-      try {
-        await deleteSession(number);
+        
+      case 'delete':
+        await deleteSession(nomor);
         return res.status(200).json({
           status: 'success',
-          message: `Session for ${number} deleted successfully`
+          message: `Session for ${nomor} deleted successfully`
         });
-      } catch (error) {
-        return res.status(500).json({
-          status: 'error',
-          message: error.message
-        });
-      }
     }
     
-    // Jika action = 'connect'
-    console.log(`Starting WhatsApp connection for: ${number}`);
-    
-    // Ambil session dari Redis
-    const savedState = await getSession(number);
-    
-    // Inisialisasi state
-    let authState = savedState || {
-      creds: {},
-      keys: makeCacheableSignalKeyStore({}, { logger: pino().child({ level: 'fatal' }) })
-    };
-    
-    console.log(`Session state for ${number}:`, savedState ? 'found' : 'not found');
-    
-    // Buat socket WhatsApp
-    const sock = makeWASocket({
-      logger: pino({ level: 'fatal' }),
-      printQRInTerminal: false,
-      auth: authState,
-      connectTimeoutMs: 60000,
-      defaultQueryTimeoutMs: 0,
-      keepAliveIntervalMs: 10000,
-      emitOwnEvents: true,
-      fireInitQueries: true,
-      generateHighQualityLinkPreview: true,
-      syncFullHistory: false,
-      markOnlineOnConnect: true,
-      browser: ["Chrome", "Ubuntu", "20.0.04"],
-      getMessage: async () => {
-        return undefined;
-      },
-    });
-    
-    console.log('Connection update: connecting');
-    
-    // Flag untuk mencegah multiple responses
-    let responseSent = false;
-    
-    // Handler untuk update koneksi
-    sock.ev.on('connection.update', async (update) => {
+    // Fungsi untuk koneksi ke WhatsApp (action = 'connect')
+    async function connectToWhatsApp() {
       try {
-        console.log('Connection update:', update.connection || 'event');
-        
-        const { qr, connection, lastDisconnect, pairingCode } = update;
-        
-        // Handle QR Code
-        if (qr && !responseSent) {
-          console.log('QR Code generated');
-          responseSent = true;
-          
-          const qrImage = await QRCode.toDataURL(qr);
-          return res.status(200).json({
-            status: 'success',
-            qrCode: qrImage,
-            message: `QR code for ${number} generated successfully`,
-            qr: qr // Tambahkan raw QR untuk backup
-          });
-        }
-        
-        // Handle Pairing Code
-        if (pairingCode && !responseSent) {
-          console.log('Pairing code generated:', pairingCode);
-          responseSent = true;
-          
-          return res.status(200).json({
-            status: 'success',
-            pairingCode,
-            message: `Pairing code for ${number} generated successfully`,
-          });
-        }
-        
-        // Handle Connection Open
-        if (connection === 'open') {
-          console.log(`✅ Connected to WhatsApp for number: ${number}`);
-          
-          // Simpan status connected
-          await redis.set(`whatsapp:connected:${number}`, 'true', { ex: 86400 });
-          
-          // Kirim response success jika belum dikirim
-          if (!responseSent) {
-            responseSent = true;
-            return res.status(200).json({
-              status: 'success',
-              message: `Connected to WhatsApp successfully for ${number}`,
-              user: sock.user ? { id: sock.user.id } : null
-            });
+        // Ambil session dari Redis
+        const savedState = await getSession(nomor);
+        const authState = savedState || {};
+        const usePairingCode = true;
+
+        const sock = makeWASocket({
+          logger: pino({
+level: "silent"
+}),
+printQRInTerminal: false,
+auth: authState,
+connectTimeoutMs: 60000,
+defaultQueryTimeoutMs: 0,
+keepAliveIntervalMs: 10000,
+emitOwnEvents: true,
+fireInitQueries: true,
+generateHighQualityLinkPreview: true,
+syncFullHistory: true,
+markOnlineOnConnect: true,
+browser: ["iOS", "Safari", "16.5.1" ],
+        });
+
+        // Event handler untuk koneksi
+        sock.ev.on('connection.update', async (update) => {
+          try {
+            const { qr, connection, lastDisconnect, pairingCode } = update;
+
+            if (qr) {
+              const qrImage = await QRCode.toDataURL(qr);
+              // Kirim response hanya jika belum dikirim
+              
+                return res.status(200).json({
+                  status: 'success',
+                  qrCode: qrImage,
+                  message: `QR code for ${nomor} generated successfully`,
+                });
+              
+              return;
+            }
+
+            if (pairingCode) {
+             // if (!res.headersSent) {
+                return res.status(200).json({
+                  status: 'success',
+                  pairingCode,
+                  message: `Pairing code for ${nomor} generated successfully`,
+                });
+             // }
+              return;
+            }
+
+            if (connection === 'open') {
+              console.log(`Connected to WhatsApp for nomor: ${nomor}`);
+         
+              
+              // Periksa dengan hati-hati
+              if (sock && sock.user && sock.user.id) {
+                console.log(`User connected: ${sock.user.id}`);
+                // Update session info after successful connection
+                await redis.set(`whatsapp:connected:${nomor}`, 'true', {
+                  ex: 86400, // 1 hari
+                });
+              } else {
+                console.log('Connected but user info not available yet');
+                // Tetap simpan status connected
+                await redis.set(`whatsapp:connected:${nomor}`, 'true', {
+                  ex: 86400,
+                });
+              }
+            }
+
+            if (connection === 'close') {
+              const reason = lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
+              console.log(`Connection closed for nomor: ${nomor} - Reason: ${reason}`);
+
+              // Hapus connected status
+              await redis.del(`whatsapp:connected:${nomor}`);
+
+              if (reason !== DisconnectReason.loggedOut) {
+                console.log('Reconnecting...');
+                // Hindari infinite loop dengan delay
+                await connectToWhatsApp();
+              } else {
+                console.log('User logged out, clearing session');
+                await deleteSession(nomor);
+              }
+            }
+          } catch (error) {
+            console.error('Error in connection.update handler:', error.message);
+            // Jangan kirim response jika sudah dikirim
+          //  if (!res.headersSent) {
+              res.status(500).json({
+                status: 'error',
+                message: `Error in connection handler: ${error.message}`,
+              });
+           // }
           }
-        }
-        
-        // Handle Connection Close
-        if (connection === 'close') {
-          const statusCode = lastDisconnect?.error?.output?.statusCode;
-          const reason = statusCode || 'Unknown Reason';
-          
-          console.log(`❌ Connection closed for ${number} - Reason: ${reason}`);
-          
-          // Hapus status connected
-          await redis.del(`whatsapp:connected:${number}`);
-          
-          // Jika logged out, hapus session
-          if (reason === DisconnectReason.loggedOut || statusCode === 401) {
-            console.log('User logged out, clearing session');
-            await deleteSession(number);
+        });
+
+        // Simpan kredensial saat diperbarui
+        sock.ev.on('creds.update', async (newState) => {
+          try {
+            // Pastikan state memiliki struktur yang benar
+            const stateToSave = {
+              creds: newState,
+              keys: sock.authState.keys
+            };
+            await saveSession(nomor, stateToSave);
+          } catch (err) {
+            console.error(`Failed to save session for ${nomor}:`, err.message);
           }
-          
-          // Kirim error response jika belum ada response
-          if (!responseSent) {
-            responseSent = true;
-            return res.status(500).json({
-              status: 'error',
-              message: `Connection closed: ${reason}`,
-              reconnect: reason !== DisconnectReason.loggedOut && statusCode !== 401
-            });
+        });
+
+        // Tambahkan error handler untuk socket
+        sock.ev.on('connection.update', (update) => {
+          if (update.error) {
+            console.error('Socket error:', update.error);
           }
-        }
-        
-      } catch (error) {
-        console.error('Error in connection.update handler:', error.message);
-        
-        if (!responseSent) {
-          responseSent = true;
-          return res.status(500).json({
-            status: 'error',
-            message: `Connection error: ${error.message}`
-          });
-        }
-      }
-    });
-    
-    // Handler untuk update credentials
-    sock.ev.on('creds.update', async (creds) => {
-      try {
-        console.log('Credentials updated for', number);
-        
-        // Simpan state yang lengkap
-        const stateToSave = {
-          creds: creds,
-          keys: sock.authState.keys
-        };
-        
-        await saveSession(number, stateToSave);
-      } catch (error) {
-        console.error('Error saving credentials:', error.message);
-      }
-    });
-    
-    // Coba request pairing code jika fitur tersedia
-    setTimeout(async () => {
-      try {
-        // Cek jika sudah terkoneksi
-        if (sock.user) {
-          console.log('Already connected, skipping pairing code request');
-          return;
-        }
-        
-        // Coba request pairing code
-        if (sock.requestPairingCode && typeof sock.requestPairingCode === 'function') {
-          console.log('Requesting pairing code for:', number);
-          
-          const pairingCode = await sock.requestPairingCode(number.replace(/[^0-9]/g, ''));
-          
-          if (pairingCode && !responseSent) {
-            responseSent = true;
-            console.log('Pairing code received:', pairingCode);
+        });
+
+        // Permintaan pairing code jika diperlukan
+        if (usePairingCode && sock.requestPairingCode) {
+          try {
+            const code = await sock.requestPairingCode(nomor);
+            console.log(`Pairing code for ${nomor}: ${code}`);
+            // Jika belum ada response, kirim pairing code
             
-            return res.status(200).json({
-              status: 'success',
-              pairingCode,
-              message: `Pairing code for ${number} generated successfully`,
-            });
+              return res.status(200).json({
+                status: 'success',
+                pairingCode: code,
+                message: `Pairing code for ${nomor} generated successfully`,
+              });
+            
+          } catch (error) {
+            console.error('Error getting pairing code:', error.message);
           }
         }
-      } catch (error) {
-        console.error('Error requesting pairing code:', error.message);
-        // Tidak perlu kirim error karena mungkin QR code sudah dikirim
-      }
-    }, 2000);
-    
-    // Timeout handler
-    setTimeout(() => {
-      if (!responseSent) {
-        responseSent = true;
-        console.log('Connection timeout');
+
+        // Jika tidak ada response dalam 30 detik, kirim timeout
         
-        return res.status(408).json({
-          status: 'error',
-          message: 'Connection timeout. Please try again.',
-          suggestion: 'Make sure your number is valid and try again in 30 seconds'
-        });
+        
+      } catch (error) {
+        console.error(`Error during WhatsApp connection:`, error.message);
+        if (!res.headersSent) {
+          res.status(500).json({
+            status: 'error',
+            message: `Failed to connect to WhatsApp: ${error.message}`,
+          });
+        }
       }
-    }, 45000); // 45 detik timeout
-    
+    }
+
+    await connectToWhatsApp();
   } catch (error) {
-    console.error(`Error for number: ${req.query.number || 'unknown'} -`, error.message);
-    
-    return res.status(500).json({ 
-      status: 'error', 
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    console.error(`Error for nomor: ${req.query.nomor || 'unknown'} -`, error.message);
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        status: 'error', 
+        message: error.message 
+      });
+    }
   }
 };
