@@ -142,14 +142,7 @@ async function getSessionInfo(nomor) {
 
 export default async (req, res) => {
   // Set timeout untuk response
-  res.setTimeout(45000, () => {
-    if (!res.headersSent) {
-      res.status(408).json({
-        status: 'error',
-        message: 'Request timeout'
-      });
-    }
-  });
+  
 
   try {
     const nomor = req.query.nomor;
@@ -204,23 +197,23 @@ export default async (req, res) => {
       let responseSent = false;
       
       const sendResponse = (data) => {
-        if (!responseSent && !res.headersSent) {
+        
           responseSent = true;
           res.status(200).json(data);
           return true;
-        }
+        
         return false;
       };
       
       const sendError = (message) => {
-        if (!responseSent && !res.headersSent) {
+        
           responseSent = true;
           res.status(500).json({
             status: 'error',
             message: message
           });
           return true;
-        }
+        
         return false;
       };
       
@@ -229,10 +222,7 @@ export default async (req, res) => {
         const savedState = await getSession(nomor);
         console.log(`Session state for ${nomor}:`, savedState ? 'found' : 'not found');
         
-        const authState = savedState || {
-          creds: {},
-          keys: makeCacheableSignalKeyStore({})
-        };
+        const authState = savedState || {};
         
         const usePairingCode = true;
 
@@ -245,11 +235,12 @@ export default async (req, res) => {
           keepAliveIntervalMs: 10000,
           emitOwnEvents: true,
           fireInitQueries: false, // Set ke false dulu
-          generateHighQualityLinkPreview: false,
+          generateHighQualityLinkPreview: true,
           syncFullHistory: false,
-          markOnlineOnConnect: false, // Set ke false dulu
+          markOnlineOnConnect: true, // Set ke false dulu
           browser: Browsers.ubuntu('Chrome'),
-          getMessage: async () => undefined,
+          
+          
         });
 
         // Event handler untuk koneksi
@@ -357,7 +348,7 @@ export default async (req, res) => {
         // Request pairing code jika diperlukan
         if (usePairingCode && sock && sock.requestPairingCode) {
           // Tunggu sebentar sebelum request pairing code
-          setTimeout(async () => {
+          
             try {
               const code = await sock.requestPairingCode(nomor);
               console.log(`Pairing code for ${nomor}: ${code}`);
@@ -373,18 +364,9 @@ export default async (req, res) => {
               console.error('Error getting pairing code:', error.message);
               // Tidak perlu kirim error karena mungkin QR akan muncul
             }
-          }, 3000);
         }
-
         // Timeout handler
-        setTimeout(() => {
-          if (!responseSent) {
-            sendResponse({
-              status: 'waiting',
-              message: 'Waiting for QR code or pairing code...'
-            });
-          }
-        }, 10000);
+        
 
       } catch (error) {
         console.error(`Error during WhatsApp connection setup:`, error.message);
