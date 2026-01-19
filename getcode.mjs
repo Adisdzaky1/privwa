@@ -202,9 +202,7 @@ export default async (req, res) => {
 
             if (connection === 'open') {
               console.log(`Connected to WhatsApp for nomor: ${nomor}`);
-              
-              // Tunggu sebentar sebelum mengakses sock.user
-              await delay(2000);
+         
               
               // Periksa dengan hati-hati
               if (sock && sock.user && sock.user.id) {
@@ -232,7 +230,6 @@ export default async (req, res) => {
               if (reason !== DisconnectReason.loggedOut) {
                 console.log('Reconnecting...');
                 // Hindari infinite loop dengan delay
-                await delay(5000);
                 await connectToWhatsApp();
               } else {
                 console.log('User logged out, clearing session');
