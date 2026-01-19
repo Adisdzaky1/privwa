@@ -179,24 +179,24 @@ export default async (req, res) => {
             if (qr) {
               const qrImage = await QRCode.toDataURL(qr);
               // Kirim response hanya jika belum dikirim
-              if (!res.headersSent) {
+              
                 return res.status(200).json({
                   status: 'success',
                   qrCode: qrImage,
                   message: `QR code for ${nomor} generated successfully`,
                 });
-              }
+              
               return;
             }
 
             if (pairingCode) {
-              if (!res.headersSent) {
+             // if (!res.headersSent) {
                 return res.status(200).json({
                   status: 'success',
                   pairingCode,
                   message: `Pairing code for ${nomor} generated successfully`,
                 });
-              }
+             // }
               return;
             }
 
@@ -242,12 +242,12 @@ export default async (req, res) => {
           } catch (error) {
             console.error('Error in connection.update handler:', error.message);
             // Jangan kirim response jika sudah dikirim
-            if (!res.headersSent) {
+          //  if (!res.headersSent) {
               res.status(500).json({
                 status: 'error',
                 message: `Error in connection handler: ${error.message}`,
               });
-            }
+           // }
           }
         });
 
