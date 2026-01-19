@@ -4,14 +4,17 @@ import makeWASocket, {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
+  makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
+  proto,
+  PHONENUMBER_MCC,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { Redis } from '@upstash/redis';
@@ -23,15 +26,15 @@ const redis = new Redis({
 });
 
 // Fungsi untuk mendapatkan sesi dari Redis
-async function getSession(nomor) {
+async function getSession(number) {
   try {
-    const authState = await redis.get(`whatsapp:session:${nomor}`);
+    const authState = await redis.get(`whatsapp:session:${number}`);
     
     if (authState) {
       try {
         return JSON.parse(authState);
       } catch (e) {
-        console.error(`Error parsing auth state for ${nomor}:`, e.message);
+        console.error(`Error parsing auth state for ${number}:`, e.message);
         return null;
       }
     }
@@ -43,25 +46,29 @@ async function getSession(nomor) {
 }
 
 // Fungsi untuk menyimpan sesi ke Redis
-async function saveSession(nomor, state) {
+async function saveSession(number, state) {
   try {
-    // Simpan dengan TTL 7 hari (604800 detik)
-    await redis.set(`whatsapp:session:${nomor}`, JSON.stringify(state), {
-      ex: 2592000, // 30 hari dalam detik
+    // Simpan dengan TTL 30 hari
+    await redis.set(`whatsapp:session:${number}`, JSON.stringify(state), {
+      ex: 2592000,
     });
     
     // Simpan juga ke set untuk tracking semua session
-    await redis.sadd('whatsapp:sessions:list', nomor);
+    await redis.sadd('whatsapp:sessions:list', number);
   } catch (err) {
     console.error(`Error in saveSession:`, err.message);
   }
 }
 
 // Fungsi untuk menghapus sesi
-async function deleteSession(nomor) {
+async function deleteSession(number) {
   try {
-    await redis.del(`whatsapp:session:${nomor}`);
-    await redis.srem('whatsapp:sessions:list', nomor);
+    await redis.del(`whatsapp:session:${number}`);
+    await redis.srem('whatsapp:sessions:list', number);
+    
+    // Hapus juga status connected dan user info
+    await redis.del(`whatsapp:connected:${number}`);
+    await redis.del(`whatsapp:user:${number}`);
   } catch (err) {
     console.error(`Error in deleteSession:`, err.message);
   }
@@ -79,15 +86,19 @@ async function getAllSessions() {
 }
 
 // Fungsi untuk mendapatkan info sesi
-async function getSessionInfo(nomor) {
+async function getSessionInfo(number) {
   try {
-    const ttl = await redis.ttl(`whatsapp:session:${nomor}`);
-    const exists = await redis.exists(`whatsapp:session:${nomor}`);
+    const ttl = await redis.ttl(`whatsapp:session:${number}`);
+    const exists = await redis.exists(`whatsapp:session:${number}`);
+    const connected = await redis.exists(`whatsapp:connected:${number}`);
+    const userInfo = await redis.get(`whatsapp:user:${number}`);
     
     return {
       exists: exists === 1,
-      ttl: ttl, // -2: key tidak ada, -1: no expiry, >=0: sisa waktu dalam detik
-      expires_in: ttl > 0 ? `${Math.floor(ttl / 86400)} hari ${Math.floor((ttl % 86400) / 3600)} jam` : 'tidak ada expiry'
+      connected: connected === 1,
+      ttl: ttl,
+      expires_in: ttl > 0 ? `${Math.floor(ttl / 86400)} hari ${Math.floor((ttl % 86400) / 3600)} jam` : 'tidak ada expiry',
+      user_info: userInfo ? JSON.parse(userInfo) : null
     };
   } catch (err) {
     console.error(`Error in getSessionInfo:`, err.message);
@@ -97,13 +108,13 @@ async function getSessionInfo(nomor) {
 
 export default async (req, res) => {
   try {
-    const nomor = req.query.nomor;
+    const number = req.query.number;
     const action = req.query.action || 'connect'; // connect, list, info, delete
     
-    if (!nomor && !['list'].includes(action)) {
+    if (!number && !['list'].includes(action)) {
       return res.status(400).json({
         status: 'error',
-        message: 'Parameter "nomor" is required for this action',
+        message: 'Parameter "number" is required for this action',
       });
     }
     
@@ -113,10 +124,10 @@ export default async (req, res) => {
         const sessions = await getAllSessions();
         const sessionsInfo = [];
         
-        for (const sessionNomor of sessions) {
-          const info = await getSessionInfo(sessionNomor);
+        for (const sessionNumber of sessions) {
+          const info = await getSessionInfo(sessionNumber);
           sessionsInfo.push({
-            nomor: sessionNomor,
+            number: sessionNumber,
             ...info
           });
         }
@@ -128,18 +139,18 @@ export default async (req, res) => {
         });
         
       case 'info':
-        const info = await getSessionInfo(nomor);
+        const info = await getSessionInfo(number);
         return res.status(200).json({
           status: 'success',
-          nomor: nomor,
+          number: number,
           ...info
         });
         
       case 'delete':
-        await deleteSession(nomor);
+        await deleteSession(number);
         return res.status(200).json({
           status: 'success',
-          message: `Session for ${nomor} deleted successfully`
+          message: `Session for ${number} deleted successfully`
         });
     }
     
@@ -147,7 +158,7 @@ export default async (req, res) => {
     async function connectToWhatsApp() {
       try {
         // Ambil session dari Redis
-        const savedState = await getSession(nomor);
+        const savedState = await getSession(number);
         const authState = savedState || {};
         const usePairingCode = true;
 
@@ -164,6 +175,8 @@ export default async (req, res) => {
           syncFullHistory: true,
           markOnlineOnConnect: true,
           browser: ["iOS", "Safari", "16.5.1"],
+          // Tambahkan options untuk mendapatkan user info
+          getMessage: async () => undefined,
         });
 
         // Event handler untuk koneksi
@@ -175,7 +188,7 @@ export default async (req, res) => {
             return res.status(200).json({
               status: 'success',
               qrCode: qrImage,
-              message: `QR code for ${nomor} generated successfully`,
+              message: `QR code for ${number} generated successfully`,
             });
           }
 
@@ -183,37 +196,61 @@ export default async (req, res) => {
             return res.status(200).json({
               status: 'success',
               pairingCode,
-              message: `Pairing code for ${nomor} generated successfully`,
+              message: `Pairing code for ${number} generated successfully`,
             });
           }
 
           if (connection === 'open') {
-            console.log(`Connected to WhatsApp for nomor: ${nomor}`);
-            if (sock?.user) {
-              console.log(`User: ${sock.user.id} connected`);
-              // Update session info after successful connection
-              await redis.set(`whatsapp:connected:${nomor}`, 'true', {
-                ex: 86400, // 1 hari
-              });
-            } else {
-              console.warn('User information is undefined');
+            console.log(`Connected to WhatsApp for number: ${number}`);
+            
+            // Simpan status connected
+            await redis.set(`whatsapp:connected:${number}`, 'true', {
+              ex: 86400, // 1 hari
+            });
+            
+            // Simpan informasi user dengan cara yang lebih aman
+            try {
+              // Coba beberapa cara untuk mendapatkan user info
+              let userInfo = null;
+              
+              if (sock.user && sock.user.id) {
+                userInfo = sock.user;
+              } else if (sock.authState && sock.authState.creds && sock.authState.creds.me) {
+                // Alternatif: dapatkan dari creds
+                userInfo = {
+                  id: sock.authState.creds.me.id || number,
+                  name: sock.authState.creds.me.name || 'Unknown'
+                };
+              } else {
+                // Buat user info default
+                userInfo = {
+                  id: number,
+                  name: 'WhatsApp User'
+                };
+              }
+              
+              await redis.set(`whatsapp:user:${number}`, JSON.stringify(userInfo), { ex: 86400 });
+              console.log(`User info saved for ${number}:`, userInfo.id);
+            } catch (userError) {
+              console.error(`Error saving user info for ${number}:`, userError.message);
             }
           }
 
           if (connection === 'close') {
-            const reason =
-              lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
-            console.log(`Connection closed for nomor: ${nomor} - Reason: ${reason}`);
+            const reason = lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
+            console.log(`Connection closed for number: ${number} - Reason: ${reason}`);
 
             // Hapus connected status
-            await redis.del(`whatsapp:connected:${nomor}`);
+            await redis.del(`whatsapp:connected:${number}`);
 
             if (reason !== DisconnectReason.loggedOut) {
               console.log('Reconnecting...');
+              // Tunggu sebentar sebelum reconnect
+              await new Promise(resolve => setTimeout(resolve, 5000));
               await connectToWhatsApp();
             } else {
               console.log('User logged out, clearing session');
-              await deleteSession(nomor);
+              await deleteSession(number);
             }
           }
         });
@@ -221,31 +258,55 @@ export default async (req, res) => {
         // Simpan kredensial saat diperbarui
         sock.ev.on('creds.update', async (newState) => {
           try {
-            await saveSession(nomor, newState);
+            // Simpan state yang sudah digabungkan dengan existing state
+            const existingState = await getSession(number) || {};
+            const updatedState = {
+              ...existingState,
+              creds: newState
+            };
+            await saveSession(number, updatedState);
+            console.log(`Session updated for ${number}`);
           } catch (err) {
-            console.error(`Failed to save session for ${nomor}:`, err.message);
+            console.error(`Failed to save session for ${number}:`, err.message);
           }
         });
 
         // Permintaan pairing code jika diperlukan
         if (usePairingCode) {
-          const code = await sock.requestPairingCode(nomor);
-          console.log(`Pairing code for ${nomor}: ${code}`);
+          try {
+            const code = await sock.requestPairingCode(number);
+            console.log(`Pairing code for ${number}: ${code}`);
+            
+            // Jika pairing code berhasil, kembalikan response
+            if (!res.headersSent) {
+              return res.status(200).json({
+                status: 'success',
+                pairingCode: code,
+                message: `Pairing code for ${number} generated successfully`,
+              });
+            }
+          } catch (pairingError) {
+            console.error(`Error getting pairing code for ${number}:`, pairingError.message);
+          }
         }
         
         return sock;
       } catch (error) {
         console.error(`Error during WhatsApp connection:`, error.message);
-        res.status(500).json({
-          status: 'error',
-          message: `Failed to connect to WhatsApp\n${error}`,
-        });
+        if (!res.headersSent) {
+          res.status(500).json({
+            status: 'error',
+            message: 'Failed to connect to WhatsApp',
+          });
+        }
       }
     }
 
     await connectToWhatsApp();
   } catch (error) {
-    console.error(`Error for nomor: ${req.query.nomor || 'unknown'} -`, error.message);
-    res.status(500).json({ status: 'error', message: error.message });
+    console.error(`Error for number: ${req.query.number || 'unknown'} -`, error.message);
+    if (!res.headersSent) {
+      res.status(500).json({ status: 'error', message: error.message });
+    }
   }
 };
