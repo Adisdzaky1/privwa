@@ -112,7 +112,7 @@ export default async (req, res) => {
       const pairingCode = true;
 
       const sock = makeWASocket({
-       // version,
+       version,
         logger: pino({ level: "silent" }),
         printQRInTerminal: false,
         auth: {
@@ -173,7 +173,7 @@ browser: ["iOS", "Safari", "16.5.1" ],
       if (pairingCode && !res.headersSent) {
         try {
           // Beri jeda sedikit agar socket siap
-          
+          await new Promise(resolve => setTimeout(resolve, 3000));
           const code = await sock.requestPairingCode(nomor);
           return res.status(200).json({
             status: 'success',
