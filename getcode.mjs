@@ -14,7 +14,7 @@ import makeWASocket, {
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
   getContentType
-} from 'baileys';
+} from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { Redis } from '@upstash/redis';
