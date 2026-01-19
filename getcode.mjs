@@ -7,8 +7,6 @@ import makeWASocket, {
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  proto,
-  PHONENUMBER_MCC,
   jidDecode,
   delay,
   getAggregateVotesInPollMessage,
