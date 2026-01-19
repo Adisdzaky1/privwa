@@ -23,7 +23,10 @@ const app = express();
 // ======================
 // SECURITY MIDDLEWARES
 // ======================
-app.set('trust proxy', 1); // atau true untuk mempercayai semua proxy
+
+// Set trust proxy untuk menangani X-Forwarded-For header
+app.set('trust proxy', 1); // Tambahkan ini
+
 // 1. Helmet.js - Security headers
 app.use(helmet({
   contentSecurityPolicy: {
@@ -46,16 +49,17 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
-// 3. Rate Limiting
+// 3. Rate Limiting - Update configuration untuk trust proxy
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // Limit each IP to 100 requests per windowMs
+  max: 500, // Limit each IP to 500 requests per windowMs
   message: {
     status: 'error',
     message: 'Terlalu banyak permintaan dari IP ini, coba lagi nanti.'
   },
   standardHeaders: true,
   legacyHeaders: false,
+  trustProxy: 1, // Tambahkan ini
 });
 
 const authLimiter = rateLimit({
@@ -64,7 +68,8 @@ const authLimiter = rateLimit({
   message: {
     status: 'error',
     message: 'Terlalu banyak percobaan koneksi, coba lagi nanti.'
-  }
+  },
+  trustProxy: 1, // Tambahkan ini
 });
 
 // Apply rate limiting
@@ -76,14 +81,32 @@ app.use(express.json({ limit: '10kb' })); // Batas ukuran JSON
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(compression());
 
-// 5. Logging
-const accessLogStream = fs.createWriteStream(
-  path.join(__dirname, 'access.log'), 
-  { flags: 'a' }
-);
+// 5. Logging - Hanya di development atau jika bukan di Vercel
+const isVercel = process.env.VERCEL === '1';
+const isProduction = process.env.NODE_ENV === 'production';
 
-app.use(morgan('combined', { stream: accessLogStream }));
-app.use(morgan('dev')); // Console logging untuk development
+if (isVercel || isProduction) {
+  // Di Vercel/Production, hanya gunakan console logging
+  app.use(morgan('combined'));
+  console.log('Running in Vercel/Production mode - File logging disabled');
+} else {
+  // Di development, gunakan file logging
+  try {
+    const accessLogStream = fs.createWriteStream(
+      path.join(__dirname, 'access.log'), 
+      { flags: 'a' }
+    );
+    app.use(morgan('combined', { stream: accessLogStream }));
+    console.log('Running in Development mode - File logging enabled');
+  } catch (error) {
+    // Fallback ke console logging jika gagal membuat file
+    console.error('Failed to create log file, using console logging:', error.message);
+    app.use(morgan('combined'));
+  }
+}
+
+// Console logging untuk semua environment
+app.use(morgan('dev'));
 
 // ======================
 // CUSTOM MIDDLEWARES
@@ -294,13 +317,18 @@ app.use((err, req, res, next) => {
     timestamp: new Date().toISOString()
   });
   
-  // Log to file
-  const errorLogStream = fs.createWriteStream(
-    path.join(__dirname, 'error.log'), 
-    { flags: 'a' }
-  );
-  
-  errorLogStream.write(`${new Date().toISOString()} - ${req.method} ${req.path} - ${err.message}\n${err.stack}\n\n`);
+  // Hanya log ke file jika bukan di Vercel/Production
+  if (!isVercel && !isProduction) {
+    try {
+      const errorLogStream = fs.createWriteStream(
+        path.join(__dirname, 'error.log'), 
+        { flags: 'a' }
+      );
+      errorLogStream.write(`${new Date().toISOString()} - ${req.method} ${req.path} - ${err.message}\n${err.stack}\n\n`);
+    } catch (fileError) {
+      console.error('Failed to write error log to file:', fileError.message);
+    }
+  }
   
   res.status(err.status || 500).json({
     status: 'error',
