@@ -1,4 +1,4 @@
-import makeWASocket, {
+iimport makeWASocket, {
   generateWAMessageFromContent,
   prepareWAMessageMedia,
   Browsers,
@@ -92,103 +92,133 @@ async function handleConnect(req, res, nomor) {
     const sock = makeWASocket({
       logger: pino({ level: "silent" }),
       printQRInTerminal: false,
-      auth: authState,
+      auth: {
+        creds: authState.creds || {},
+        keys: authState.keys || makeCacheableSignalKeyStore({}),
+      },
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 0,
       keepAliveIntervalMs: 10000,
       emitOwnEvents: true,
       fireInitQueries: true,
       generateHighQualityLinkPreview: true,
-      syncFullHistory: true,
+      syncFullHistory: false, // Ubah ke false
       markOnlineOnConnect: true,
       browser: ["iOS", "Safari", "16.5.1"],
+      getMessage: async () => undefined,
     });
 
     sock.ev.on('connection.update', async (update) => {
-      const { qr, connection, lastDisconnect, pairingCode } = update;
+      try {
+        const { qr, connection, lastDisconnect, pairingCode } = update;
 
-      if (qr) {
-        const qrImage = await QRCode.toDataURL(qr);
-        return res.status(200).json({
-          status: 'success',
-          qrCode: qrImage,
-          message: `QR code for ${nomor} generated successfully`,
-        });
-      }
-
-      if (pairingCode) {
-        return res.status(200).json({
-          status: 'success',
-          pairingCode,
-          message: `Pairing code for ${nomor} generated successfully`,
-        });
-      }
-
-      if (connection === 'open') {
-        console.log(`Connected to WhatsApp for nomor: ${nomor}`);
-        await redis.set(`whatsapp:connected:${nomor}`, 'true', { ex: 86400 });
-        
-        // Simpan informasi user
-        if (sock?.user) {
-          await redis.set(`whatsapp:user:${nomor}`, JSON.stringify(sock.user), { ex: 86400 });
+        if (qr) {
+          const qrImage = await QRCode.toDataURL(qr);
+          if (!res.headersSent) {
+            return res.status(200).json({
+              status: 'success',
+              qrCode: qrImage,
+              message: `QR code for ${nomor} generated successfully`,
+            });
+          }
+          return;
         }
-      }
 
-      if (connection === 'close') {
-        const reason = lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
-        console.log(`Connection closed for nomor: ${nomor} - Reason: ${reason}`);
-        
-        await redis.del(`whatsapp:connected:${nomor}`);
-        await redis.del(`whatsapp:user:${nomor}`);
-
-        if (reason === DisconnectReason.loggedOut) {
-          console.log('User logged out, clearing session');
-          await redis.del(`whatsapp:session:${nomor}`);
-          await redis.srem('whatsapp:sessions:list', nomor);
+        if (pairingCode) {
+          if (!res.headersSent) {
+            return res.status(200).json({
+              status: 'success',
+              pairingCode,
+              message: `Pairing code for ${nomor} generated successfully`,
+            });
+          }
+          return;
         }
+
+        if (connection === 'open') {
+          console.log(`Connected to WhatsApp for nomor: ${nomor}`);
+          await redis.set(`whatsapp:connected:${nomor}`, 'true', { ex: 86400 });
+          
+          // Simpan informasi user
+          if (sock?.user) {
+            await redis.set(`whatsapp:user:${nomor}`, JSON.stringify(sock.user), { ex: 86400 });
+          }
+        }
+
+        if (connection === 'close') {
+          const reason = lastDisconnect?.error?.output?.statusCode || 'Unknown Reason';
+          console.log(`Connection closed for nomor: ${nomor} - Reason: ${reason}`);
+          
+          await redis.del(`whatsapp:connected:${nomor}`);
+          await redis.del(`whatsapp:user:${nomor}`);
+
+          if (reason === DisconnectReason.loggedOut) {
+            console.log('User logged out, clearing session');
+            await redis.del(`whatsapp:session:${nomor}`);
+            await redis.srem('whatsapp:sessions:list', nomor);
+          }
+        }
+      } catch (error) {
+        console.error('Error in connection.update handler:', error.message);
       }
     });
 
     sock.ev.on('creds.update', async (newState) => {
       try {
-        await saveSession(nomor, newState);
+        const stateToSave = {
+          creds: newState,
+          keys: sock.authState.keys
+        };
+        await saveSession(nomor, stateToSave);
       } catch (err) {
         console.error(`Failed to save session for ${nomor}:`, err.message);
       }
     });
 
-    if (usePairingCode) {
+    if (usePairingCode && sock.requestPairingCode) {
       try {
         const code = await sock.requestPairingCode(nomor);
         console.log(`Pairing code for ${nomor}: ${code}`);
-        return res.status(200).json({
-          status: 'success',
-          pairingCode: code,
-          message: `Pairing code for ${nomor} generated successfully`,
-        });
+        if (!res.headersSent) {
+          return res.status(200).json({
+            status: 'success',
+            pairingCode: code,
+            message: `Pairing code for ${nomor} generated successfully`,
+          });
+        }
       } catch (error) {
         console.error('Error getting pairing code:', error.message);
-        return res.status(500).json({
-          status: 'error',
-          message: 'Failed to get pairing code'
-        });
+        if (!res.headersSent) {
+          return res.status(500).json({
+            status: 'error',
+            message: 'Failed to get pairing code'
+          });
+        }
       }
     }
 
     // Jika tidak ada QR atau pairing code, return status
-    return res.status(200).json({
-      status: 'waiting',
-      message: 'Waiting for QR code or pairing code...'
-    });
+    setTimeout(() => {
+      if (!res.headersSent) {
+        return res.status(200).json({
+          status: 'waiting',
+          message: 'Waiting for QR code or pairing code...'
+        });
+      }
+    }, 30000);
 
   } catch (error) {
     console.error(`Error during WhatsApp connection:`, error.message);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Failed to connect to WhatsApp',
-    });
+    if (!res.headersSent) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Failed to connect to WhatsApp',
+      });
+    }
   }
 }
+
+// ... (sisanya tetap sama seperti sebelumnya)
 
 // Fungsi untuk handle status koneksi
 async function handleStatus(res, nomor) {
