@@ -109,6 +109,7 @@ export default async (req, res) => {
       };
 
       const { version } = await fetchLatestBaileysVersion();
+      const pairingCode = true;
 
       const sock = makeWASocket({
         version,
@@ -139,9 +140,9 @@ export default async (req, res) => {
       });
 
       sock.ev.on('connection.update', async (update) => {
-        const { qr, connection, lastDisconnect, pairingCode } = update;
+        const { connection, lastDisconnect } = update;
 
-        if (qr && !res.headersSent) {
+        if (!pairingCode && !res.headersSent) {
           const qrImage = await QRCode.toDataURL(qr);
           return res.status(200).json({ status: 'success', qrCode: qrImage });
         }
@@ -162,7 +163,7 @@ export default async (req, res) => {
       });
 
       // Logic Pairing Code (Sesuai script awalmu)
-      if (!savedState && !res.headersSent) {
+      if (pairingCode && !res.headersSent) {
         try {
           // Beri jeda sedikit agar socket siap
           await new Promise(resolve => setTimeout(resolve, 3000));
