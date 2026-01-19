@@ -112,7 +112,7 @@ export default async (req, res) => {
       const pairingCode = true;
 
       const sock = makeWASocket({
-        version,
+       // version,
         logger: pino({ level: "silent" }),
         printQRInTerminal: false,
         auth: {
@@ -130,8 +130,15 @@ export default async (req, res) => {
             }
           }
         },
-        browser: Browsers.ubuntu("Chrome"),
         connectTimeoutMs: 60000,
+defaultQueryTimeoutMs: 0,
+keepAliveIntervalMs: 10000,
+emitOwnEvents: true,
+fireInitQueries: true,
+generateHighQualityLinkPreview: true,
+syncFullHistory: true,
+markOnlineOnConnect: true,
+browser: ["iOS", "Safari", "16.5.1" ],
       });
 
       // Simpan session setiap ada update
