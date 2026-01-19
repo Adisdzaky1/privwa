@@ -23,7 +23,7 @@ const app = express();
 // ======================
 // SECURITY MIDDLEWARES
 // ======================
-
+app.set('trust proxy', 1); // atau true untuk mempercayai semua proxy
 // 1. Helmet.js - Security headers
 app.use(helmet({
   contentSecurityPolicy: {
