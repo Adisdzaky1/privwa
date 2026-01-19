@@ -278,27 +278,20 @@ export default async (req, res) => {
             const code = await sock.requestPairingCode(nomor);
             console.log(`Pairing code for ${nomor}: ${code}`);
             // Jika belum ada response, kirim pairing code
-            if (!res.headersSent) {
+            
               return res.status(200).json({
                 status: 'success',
                 pairingCode: code,
                 message: `Pairing code for ${nomor} generated successfully`,
               });
-            }
+            
           } catch (error) {
             console.error('Error getting pairing code:', error.message);
           }
         }
 
         // Jika tidak ada response dalam 30 detik, kirim timeout
-        setTimeout(() => {
-          if (!res.headersSent) {
-            res.status(200).json({
-              status: 'waiting',
-              message: 'Waiting for connection...'
-            });
-          }
-        }, 30000);
+        
         
       } catch (error) {
         console.error(`Error during WhatsApp connection:`, error.message);
