@@ -8,7 +8,7 @@ import makeWASocket, {
   fetchLatestBaileysVersion,
   jidDecode,
   BufferJSON,
-  initAuthCreds
+  initAuthCreds,
   delay,
   getAggregateVotesInPollMessage,
   downloadContentFromMessage,
